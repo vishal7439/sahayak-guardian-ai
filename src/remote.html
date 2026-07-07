@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+
+<html lang="en"><head><meta charset="UTF-8">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Sahayak — Robot Remote</title>
+
+<style>
+
+  :root{--bg:#0d1117;--panel:#161b22;--panel-2:#1c2333;--line:#2a3244;--text:#e6edf3;--muted:#8b98a9;--accent:#4dd8c0;--accent-dim:#2a6f65;--warn:#f0883e;--danger:#f85149;--ok:#3fb950;--off:#4a5262;--token:#d2a8ff;}
+
+  *{box-sizing:border-box;margin:0;padding:0;}
+
+  body{background:var(--bg);color:var(--text);font-family:"Segoe UI",system-ui,sans-serif;min-height:100vh;padding:16px;}
+
+  .wrap{max-width:1200px;margin:0 auto;}
+
+  header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px;}
+
+  .brand h1{font-size:26px;font-weight:700;font-family:"Consolas",monospace;}
+
+  .brand h1 .dot{color:var(--accent);}
+
+  .brand .sub{color:var(--muted);font-size:13px;}
+
+  .status-bar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 14px;}
+
+  .light{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);}
+
+  .led{width:10px;height:10px;border-radius:50%;background:var(--off);transition:all .3s;}
+
+  .led.on{background:var(--ok);box-shadow:0 0 8px var(--ok);}
+
+  .led.bad{background:var(--danger);box-shadow:0 0 8px var(--danger);}
+
+  .modeswitch{display:flex;gap:8px;margin-bottom:16px;}
+
+  .tab{flex:1;padding:12px;border:1px solid var(--line);background:var(--panel);color:var(--muted);font-size:15px;font-weight:600;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;}
+
+  .tab .tag{font-size:10px;text-transform:uppercase;letter-spacing:1px;padding:2px 6px;border-radius:4px;background:var(--accent-dim);color:#fff;}
+
+  .tab .tag.paid{background:#6b4a1f;color:var(--warn);}
+
+  .tab-offline.active{border-color:var(--ok);color:var(--text);background:#10261a;}
+
+  .tab-online.active{border-color:#3b6fb0;color:var(--text);background:#12233b;}
+
+  .grid{display:grid;grid-template-columns:1.6fr 1fr;gap:16px;}
+
+  @media(max-width:900px){.grid{grid-template-columns:1fr;}}
+
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;}
+
+  .panel h2{font-size:12px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);margin-bottom:12px;font-weight:600;}
+
+  .video-frame{position:relative;width:100%;aspect-ratio:4/3;background:#000;border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center;}
+
+  .video-frame img{width:100%;height:100%;object-fit:contain;}
+
+  .video-frame .nofeed{color:var(--muted);font-size:14px;text-align:center;padding:20px;}
+
+  .estop{margin-top:12px;width:100%;padding:16px;border:none;background:var(--danger);color:#fff;font-size:18px;font-weight:700;letter-spacing:1px;border-radius:8px;cursor:pointer;text-transform:uppercase;}
+
+  .estop:active{filter:brightness(1.3);}
+
+  .dpad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:260px;margin:0 auto;}
+
+  .dpad button{aspect-ratio:1;border:1px solid var(--line);background:var(--panel-2);color:var(--text);font-size:22px;border-radius:10px;cursor:pointer;user-select:none;}
+
+  .dpad button:active,.dpad button.active{background:var(--accent-dim);border-color:var(--accent);color:#fff;}
+
+  .dpad .empty{visibility:hidden;}
+
+  .dpad .stopbtn{color:var(--warn);font-size:14px;font-weight:600;}
+
+  .speed-row{margin-top:14px;}
+
+  .speed-row label{font-size:12px;color:var(--muted);display:flex;justify-content:space-between;}
+
+  .speed-row input{width:100%;margin-top:6px;accent-color:var(--accent);}
+
+  .sensor-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+
+  .sensor{background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:12px;}
+
+  .sensor .val{font-size:24px;font-weight:700;}
+
+  .sensor .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;}
+
+  .sensor .val.near{color:var(--danger);}
+
+  .row{display:flex;gap:8px;margin-top:8px;}
+
+  .row input[type=text]{flex:1;background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:10px 12px;border-radius:8px;font-size:14px;}
+
+  .btn{background:var(--accent-dim);border:1px solid var(--accent);color:#fff;padding:10px 16px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;white-space:nowrap;}
+
+  .btn.ghost{background:transparent;border-color:var(--line);color:var(--muted);}
+
+  .cmd-input{width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:12px;border-radius:8px;font-size:15px;resize:vertical;min-height:54px;font-family:inherit;margin-bottom:8px;}
+
+  .mode-row{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;}
+
+  .mode-label{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-top:14px;}
+
+  .btn.mode.active{background:var(--accent);border-color:var(--accent);color:#04110e;}
+
+  .console{margin-top:12px;background:#0a0e14;border:1px solid var(--line);border-radius:8px;padding:12px;font-family:"Consolas",monospace;font-size:13px;line-height:1.5;max-height:200px;overflow-y:auto;color:var(--muted);white-space:pre-wrap;}
+
+  .console .you{color:var(--accent);}.console .bot{color:var(--text);}.console .sys{color:var(--warn);font-size:12px;}
+
+  .warn-banner{background:#2a2010;border:1px solid #6b4a1f;color:var(--warn);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px;}
+
+  .full{grid-column:1/-1;}
+
+  .brain{border-color:var(--accent-dim);}
+
+  .online-h{color:#6cb6ff;}
+
+  .mode-note{font-size:11px;color:var(--muted);margin-top:8px;}
+
+</style></head>
+
+<body><div class="wrap">
+
+  <header>
+
+    <div class="brand"><h1>sahayak<span class="dot">.</span></h1><span class="sub">robot remote</span></div>
+
+    <div class="status-bar">
+
+      <div class="light"><span id="led-pico" class="led"></span> Pico</div>
+
+      <div class="light"><span id="led-cam" class="led"></span> Camera</div>
+
+      <div class="light"><span id="led-audio" class="led"></span> Audio</div>
+
+    </div>
+
+  </header>
+
+  <div class="modeswitch">
+
+    <button id="tab-offline" class="tab tab-offline active" onclick="switchMode('offline')">🟢 Offline mode <span class="tag">free</span></button>
+
+    <button id="tab-online" class="tab tab-online" onclick="switchMode('online')">🔵 Online mode <span class="tag paid">tokens</span></button>
+
+  </div>
+
+  <div class="grid">
+
+    <div class="panel">
+
+      <h2>Live view</h2>
+
+      <div class="video-frame">
+
+        <img id="cam" src="" alt="" onerror="this.style.display='none';document.getElementById('nofeed').style.display='block';">
+
+        <div id="nofeed" class="nofeed">No camera feed.<br>Start IP Webcam on the phone.</div>
+
+      </div>
+
+      <button class="estop" onclick="estop()">■ Emergency Stop</button>
+
+    </div>
+
+    <div class="panel">
+
+      <h2>Manual drive</h2>
+
+      <div class="dpad">
+
+        <span class="empty"></span><button data-dir="FORWARD">▲</button><span class="empty"></span>
+
+        <button data-dir="LEFT">◄</button><button class="stopbtn" data-dir="STOP">STOP</button><button data-dir="RIGHT">►</button>
+
+        <span class="empty"></span><button data-dir="BACKWARD">▼</button><span class="empty"></span>
+
+      </div>
+
+      <div class="speed-row"><label>Speed <span id="speedval">150</span></label><input id="speed" type="range" min="0" max="255" value="150"></div>
+
+      <h2 style="margin-top:20px;">Sensors</h2>
+
+      <div class="sensor-grid">
+
+        <div class="sensor"><div class="lbl">Distance</div><div id="dist" class="val">—</div></div>
+
+        <div class="sensor"><div class="lbl">Temp / Humidity</div><div id="th" class="val" style="font-size:18px;">—</div></div>
+
+      </div>
+
+      <div class="mode-note">Drive, sensors, video and speech are free.</div>
+
+    </div>
+
+    <div class="panel brain full mode-offline">
+
+      <h2>◈ Offline intelligence — free, runs on the robot</h2>
+
+      <div class="mode-row" style="margin-bottom:12px;">
+
+        <button class="btn" style="font-size:16px;padding:14px;width:100%;background:var(--accent-dim);border:2px solid var(--accent);" onclick="voiceCommand()">🎙️ VOICE COMMAND — say anything</button>
+
+      </div>
+
+      <div class="mode-row">
+
+        <button class="btn" onclick="vision('detect')">👁 What do you see?</button>
+
+        <button class="btn ghost" onclick="vision('describe')">📝 Describe scene</button>
+
+      </div>
+
+      <div class="mode-label">Autonomous modes</div>
+
+      <div class="mode-row">
+
+        <button class="btn mode" data-mode="patrol" onclick="setMode('patrol')">🧭 Patrol</button>
+
+        <button class="btn mode" data-mode="guard" onclick="setMode('guard')">🛡 Guard</button>
+
+        <button class="btn mode" data-mode="follow" onclick="setMode('follow')">🏃 Follow me</button>
+
+        <button class="btn ghost" onclick="setMode('stop')">◼ Stop mode</button>
+
+      </div>
+
+      <div class="mode-label">Voice search (offline)</div>
+
+      <div class="mode-row">
+
+        <button class="btn" onclick="voiceFind()">🎤 Find object (speak)</button>
+        <button class="btn" onclick="checkRoom()">🔍 Check room</button>
+
+      </div>
+      <div id="console" class="console"><span class="sys">Vision and modes run offline on the BPU — no tokens.</span></div>
+
+    </div>
+
+    <div class="panel brain full mode-online" style="display:none;">
+
+      <h2 class="online-h">🔵 Online agent — Gemini describes the scene</h2>
+
+      <div class="warn-banner">⚠ Online questions use Gemini (free tier). <b>Calls this session: <span id="tok">0</span></b></div>
+
+      <textarea id="cmd" class="cmd-input" placeholder="e.g. look around and greet the person you see"></textarea>
+
+      <div class="mode-row"><button class="btn" onclick="askAgent()">◈ Ask Gemini</button>
+        <button class="btn" onclick="askAgentVoice()">🎤 Ask by voice</button></div>
+
+      <div id="console2" class="console"><span class="sys">Online mode. Each command asks before spending.</span></div>
+
+    </div>
+
+    <div class="panel full mode-offline">
+
+      <h2>Make the robot speak (free)</h2>
+
+      <div class="row"><input id="say" type="text" placeholder="Type something to say out loud…"><button class="btn" onclick="doSpeak()">Speak</button></div>
+
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+
+const $=id=>document.getElementById(id);
+
+let speed=150;
+
+$('speed').addEventListener('input',e=>{speed=+e.target.value;$('speedval').textContent=speed;});
+
+async function post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});return r.json();}
+
+function log(w,m){const c=$('console');const s=document.createElement('div');s.className=w;s.textContent=(w==='you'?'▸ ':w==='bot'?'◈ ':'· ')+m;c.appendChild(s);c.scrollTop=c.scrollHeight;}
+
+function drive(d){post('/api/drive',{direction:d,speed});}
+
+function estop(){post('/api/stop');}
+
+document.querySelectorAll('.dpad button').forEach(b=>{const dir=b.dataset.dir;const press=()=>{drive(dir);b.classList.add('active');};const release=()=>{if(dir!=='STOP')drive('STOP');b.classList.remove('active');};b.addEventListener('mousedown',press);b.addEventListener('mouseup',release);b.addEventListener('mouseleave',()=>b.classList.remove('active'));b.addEventListener('touchstart',e=>{e.preventDefault();press();});b.addEventListener('touchend',e=>{e.preventDefault();release();});});
+
+const keymap={ArrowUp:'FORWARD',ArrowDown:'BACKWARD',ArrowLeft:'LEFT',ArrowRight:'RIGHT'};const held={};
+
+document.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA'].includes(document.activeElement.tagName))return;if(keymap[e.key]&&!held[e.key]){held[e.key]=true;drive(keymap[e.key]);e.preventDefault();}if(e.key===' ' && !['INPUT','TEXTAREA'].includes(document.activeElement.tagName)){estop();e.preventDefault();}});
+
+document.addEventListener('keyup',e=>{if(keymap[e.key]){held[e.key]=false;drive('STOP');e.preventDefault();}});
+
+async function pollSensors(){try{const r=await fetch('/api/sensors');const d=await r.json();if(d.ok){const dist=d.distance_cm;const el=$('dist');el.textContent=(dist==null||dist<0)?'—':dist.toFixed(0)+' cm';el.classList.toggle('near',dist!=null&&dist>=0&&dist<20);$('th').textContent=(d.temp_c==null)?'—':`${d.temp_c.toFixed(0)}°C · ${d.humidity_pct.toFixed(0)}%`;}}catch(e){}}
+
+async function pollStatus(){try{const r=await fetch('/api/status');const d=await r.json();$('led-pico').className='led '+(d.pico?'on':'bad');$('led-cam').className='led '+(d.camera?'on':'bad');$('led-audio').className='led '+(d.audio?'on':'bad');}catch(e){}}
+
+async function doSpeak(){const t=$('say').value.trim();if(!t)return;await post('/api/speak',{text:t});$('say').value='';}
+
+async function vision(k){log('you',k==='describe'?'📝 describe scene':'👁 what do you see?');log('sys','looking…');const d=await post('/api/vision',{mode:k});if(d.ok)log('bot',d.answer);else log('sys',d.error||'vision failed');}
+
+async function setMode(n){const d=await post('/api/mode/'+n);document.querySelectorAll('.btn.mode').forEach(b=>b.classList.toggle('active',b.dataset.mode===(d.mode||null)));log('sys',d.mode?('mode: '+d.mode):'mode stopped');}
+
+async function pollMode(){try{const r=await fetch('/api/mode/status');const d=await r.json();document.querySelectorAll('.btn.mode').forEach(b=>b.classList.toggle('active',b.dataset.mode===(d.mode||null)));}catch(e){}}
+
+let currentMode='offline';
+
+function switchMode(m){currentMode=m;document.querySelectorAll('.mode-offline').forEach(el=>el.style.display=(m==='offline')?'':'none');document.querySelectorAll('.mode-online').forEach(el=>el.style.display=(m==='online')?'':'none');$('tab-offline').classList.toggle('active',m==='offline');$('tab-online').classList.toggle('active',m==='online');if(m==='online')setMode('stop');}
+
+function log2(w,m){const c=$('console2');const s=document.createElement('div');s.className=w;s.textContent=(w==='you'?'▸ ':w==='bot'?'◈ ':'· ')+m;c.appendChild(s);c.scrollTop=c.scrollHeight;}
+
+async function askAgent(){const t=$('cmd').value.trim();if(!t)return;if(!confirm('Ask Gemini and use credit?\n\n"'+t+'"'))return;log2('you',t);$('cmd').value='';log2('sys','Gemini is looking…');const d=await post('/api/agent',{text:t});if(d.ok){log2('bot',d.answer);if(d.claude_calls!==undefined)$('tok').textContent=d.claude_calls;}else log2('sys',d.error||'agent failed');}
+
+async function voiceFind(){log('you','🎤 listening... say: find my <object>');const d=await post('/api/find');if(d.ok){log('sys','heard: '+d.heard);log('bot','searching for '+d.target+'...');}else{log('sys',(d.heard?('heard: '+d.heard+' — '):'')+(d.error||'find failed'));}}
+
+
+
+async function askAgentVoice(){if(!confirm('Record your question and send to Gemini?'))return;log2('you','🎤 listening... ask your question');const d=await post('/api/agent_voice');if(d.ok){log2('sys','heard: '+(d.heard||''));log2('bot',d.answer);if(d.calls!==undefined)$('tok').textContent=d.calls;}else{log2('sys',d.error||'voice ask failed');}}
+async function checkRoom(){log('you','🔍 check room');log('sys','sweeping the room...');const d=await post('/api/roomcheck');if(d.ok){log('bot','scanning — listen for the report');}else{log('sys',d.error||'roomcheck failed');}}
+async function voiceCommand(){log('you','🎙️ listening... say a command');log('sys','speak now (4s)...');const d=await post('/api/voice');if(d.ok){log('sys','heard: '+d.heard);log('bot','doing: '+d.action+(d.arg?(' '+d.arg):''));}else{log('sys',d.error||'voice failed');}}
+pollStatus();pollSensors();setInterval(pollStatus,3000);setInterval(pollSensors,1500);setInterval(pollMode,2000);
+
+</script>
+
+</body></html>
