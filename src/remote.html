@@ -120,6 +120,34 @@
 
   .mode-note{font-size:11px;color:var(--muted);margin-top:8px;}
 
+
+
+  .online-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+
+  @media(max-width:900px){.online-grid{grid-template-columns:1fr;}}
+
+  .livevis{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:14px;}
+
+  .livevis h3{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:12px;display:flex;align-items:center;gap:8px;}
+
+  .live-dot{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok);animation:pulse 1.5s infinite;}
+
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+
+  .det-row{margin-bottom:10px;}
+
+  .det-top{display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px;}
+
+  .det-name{color:var(--text);text-transform:capitalize;}
+
+  .det-pct{color:var(--accent);font-family:monospace;}
+
+  .det-bar{height:8px;background:#0a0e14;border-radius:4px;overflow:hidden;}
+
+  .det-fill{height:100%;background:linear-gradient(90deg,var(--accent-dim),var(--accent));transition:width .4s;}
+
+  .det-empty{color:var(--muted);font-size:13px;font-style:italic;}
+
 </style></head>
 
 <body><div class="wrap">
@@ -249,9 +277,19 @@
       <textarea id="cmd" class="cmd-input" placeholder="e.g. look around and greet the person you see"></textarea>
 
       <div class="mode-row"><button class="btn" onclick="askAgent()">◈ Ask Gemini</button>
-        <button class="btn" onclick="askAgentVoice()">🎤 Ask by voice</button></div>
+        <button class="btn" onclick="askAgentVoice()">🎤 Ask by voice</button>
+            <button class="btn" onclick="geminiFind()">🔎 Find anything</button>
+            <button class="btn" onclick="geminiFindVoice()">🎤 Find by voice</button></div>
 
       <div id="console2" class="console"><span class="sys">Online mode. Each command asks before spending.</span></div>
+
+      <div class="livevis" style="margin-top:14px;">
+
+        <h3><span class="live-dot"></span> Live Vision — BPU</h3>
+
+        <div id="livedets"><div class="det-empty">Starting live detection…</div></div>
+
+      </div>
 
     </div>
 
@@ -318,6 +356,48 @@ async function voiceFind(){log('you','🎤 listening... say: find my <object>');
 async function askAgentVoice(){if(!confirm('Record your question and send to Gemini?'))return;log2('you','🎤 listening... ask your question');const d=await post('/api/agent_voice');if(d.ok){log2('sys','heard: '+(d.heard||''));log2('bot',d.answer);if(d.calls!==undefined)$('tok').textContent=d.calls;}else{log2('sys',d.error||'voice ask failed');}}
 async function checkRoom(){log('you','🔍 check room');log('sys','sweeping the room...');const d=await post('/api/roomcheck');if(d.ok){log('bot','scanning — listen for the report');}else{log('sys',d.error||'roomcheck failed');}}
 async function voiceCommand(){log('you','🎙️ listening... say a command');log('sys','speak now (4s)...');const d=await post('/api/voice');if(d.ok){log('sys','heard: '+d.heard);log('bot','doing: '+d.action+(d.arg?(' '+d.arg):''));}else{log('sys',d.error||'voice failed');}}
+
+
+let liveVisTimer=null;
+
+async function updateLiveVis(){
+
+  if(currentMode!=='online'){return;}
+
+  try{
+
+    const r=await fetch('/api/detections');const d=await r.json();
+
+    const box=document.getElementById('livedets');
+
+    if(!d.detections||d.detections.length===0){
+
+      box.innerHTML='<div class="det-empty">Nothing detected right now.</div>';return;
+
+    }
+
+    box.innerHTML=d.detections.map(x=>{
+
+      const pct=Math.round(x.score*100);
+
+      return `<div class="det-row"><div class="det-top"><span class="det-name">${x.name}</span><span class="det-pct">${pct}%</span></div><div class="det-bar"><div class="det-fill" style="width:${pct}%"></div></div></div>`;
+
+    }).join('');
+
+  }catch(e){}
+
+}
+
+
+
+async function geminiFind(){const t=prompt("What should I find? (e.g. keys, black pen, charger)");if(!t)return;if(!confirm("Search for '"+t+"' using Gemini? (uses several calls)"))return;log2('you','🔎 find '+t);log2('sys','searching with Gemini vision...');const d=await post('/api/gfind',{target:t});if(d.ok){log2('bot','searching for '+d.target+'...');}else{log2('sys',d.error||'find failed');}}
+
+async function geminiFindVoice(){if(!confirm("Record and search with Gemini? (uses several calls)"))return;log2('you','🎤 say: find my <thing>');const d=await post('/api/gfind');if(d.ok){log2('bot','searching for '+d.target+'...');}else{log2('sys',d.error||'find failed');}}
+
+
+setInterval(updateLiveVis,1500);
+
+
 pollStatus();pollSensors();setInterval(pollStatus,3000);setInterval(pollSensors,1500);setInterval(pollMode,2000);
 
 </script>

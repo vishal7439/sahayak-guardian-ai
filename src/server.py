@@ -49,6 +49,37 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s  %(mes
 log = logging.getLogger("sahayak")
 
 
+# ---------------- CPU core affinity (RDK X5: 8x Cortex-A55) ----------------
+
+def pin_to_cores(cores, label=""):
+
+    """Pin the CURRENT thread/process to the given CPU cores, if supported."""
+
+    try:
+
+        if hasattr(os, "sched_setaffinity"):
+
+            os.sched_setaffinity(0, set(cores))
+
+            log.info("[affinity] %s pinned to cores %s", label, cores)
+
+    except Exception as e:
+
+        log.warning("[affinity] %s pin failed: %s", label, e)
+
+
+
+# Core plan for the RDK X5 (8 cores, 0-7):
+
+CORES_MOTOR   = [5]        # real-time critical: motor + watchdog keepalive
+
+CORES_VISION  = [6, 7]     # BPU vision work, isolated for smooth detection
+
+CORES_GENERAL = [0, 1, 2, 3]  # Flask web serving + general
+
+
+
+
 
 try:
 
@@ -243,6 +274,7 @@ def grab_frame_b64():
 # ---------------- Offline vision hook ----------------
 
 def yolo_detections():
+    pin_to_cores(CORES_VISION, "vision")
 
     """Run YOLOv8 on the BPU via the D-Robotics sample. Returns ["person", ...]."""
 
@@ -936,6 +968,98 @@ def route_command(text):
 
 
 
+def gemini_find_object(target):
+
+    """Rotate scanning; at each step ask Gemini if the target is visible. Announce when found."""
+
+    global _gemini_calls
+
+    from google import genai
+
+    from google.genai import types
+
+    import base64
+
+    client = genai.Client()
+
+    log.info("[gfind] searching for: %s", target)
+
+    do_speak("Looking for your " + target + ".")
+
+    STEPS = 8
+
+    for step in range(STEPS):
+
+        if _mode_stop.is_set():
+
+            break
+
+        if _gemini_calls >= SESSION_CAP:
+
+            do_speak("I have reached my online limit."); return
+
+        frame = grab_frame_b64()
+
+        if frame:
+
+            try:
+
+                prompt = ("Look at this camera image. Is there a " + target +
+
+                          " visible? If yes, reply exactly: YES followed by its location "
+
+                          "(left, center, or right) and a very short description. "
+
+                          "If no, reply exactly: NO. Keep it under 15 words.")
+
+                parts = [types.Part.from_bytes(data=base64.b64decode(frame), mime_type="image/jpeg"),
+
+                         types.Part.from_text(text=prompt)]
+
+                resp = client.models.generate_content(model=GEMINI_MODEL, contents=parts)
+
+                _gemini_calls += 1
+
+                answer = (resp.text or "").strip()
+
+                log.info("[gfind] step %d: %s", step, answer)
+
+                if answer.upper().startswith("YES"):
+
+                    do_drive("STOP")
+
+                    do_speak("I found your " + target + ". " + answer[3:].strip(" .:"))
+
+                    return
+
+            except Exception as e:
+
+                log.error("[gfind] %s", e)
+
+        do_drive("RIGHT", 150); _mode_stop.wait(0.4); do_drive("STOP"); _mode_stop.wait(0.6)
+
+    do_drive("STOP")
+
+    do_speak("Sorry, I could not find your " + target + ".")
+
+    log.info("[gfind] not found: %s", target)
+
+
+
+def _gfind_loop(target):
+
+    def loop():
+
+        gemini_find_object(target)
+
+        global _active_mode
+
+        _active_mode = None
+
+    return loop
+
+
+
 # ---------------- Flask ----------------
 
 app = Flask(__name__)
@@ -1168,6 +1292,94 @@ def api_voice():
 
 
 
+@app.route("/api/detections")
+
+def api_detections():
+
+    """Return raw detections (name + confidence) for the live vision panel."""
+
+    try:
+
+        import sys
+
+        VDIR = "/app/pydev_demo/02_detection_sample/03_ultralytics_yolov8"
+
+        if VDIR not in sys.path:
+
+            sys.path.insert(0, VDIR)
+
+        import sahayak_vision
+
+        results = sahayak_vision.detect()   # [(name, score), ...]
+
+        dets = [{"name": n, "score": round(float(s), 2)} for n, s in results]
+
+        return jsonify(ok=True, detections=dets)
+
+    except Exception as e:
+
+        return jsonify(ok=False, detections=[], error=str(e))
+
+
+
+@app.route("/api/gfind", methods=["POST"])
+
+def api_gfind():
+
+    """Gemini find-anything: get target (typed or voice), rotate & search with Gemini vision."""
+
+    global _mode_thread, _active_mode
+
+    d = request.get_json(silent=True) or {}
+
+    target = (d.get("target") or "").strip()
+
+    try:
+
+        if not target:
+
+            # voice: record and transcribe, use whole phrase minus 'find my/the'
+
+            import sys
+
+            if os.path.expanduser("~/sahayak") not in sys.path:
+
+                sys.path.insert(0, os.path.expanduser("~/sahayak"))
+
+            import voice_command as vc
+
+            vc.record(4)
+
+            text = vc.transcribe().lower()
+
+            for w in ["find my ", "find the ", "find a ", "find ", "where is my ", "where is the ", "where is "]:
+
+                if w in text:
+
+                    target = text.split(w,1)[1].strip(" .?!"); break
+
+            if not target:
+
+                target = text.strip(" .?!")
+
+        if not target:
+
+            return jsonify(ok=False, error="no target heard")
+
+        stop_mode(); _mode_stop.clear(); _active_mode = "gfind:" + target
+
+        _mode_thread = threading.Thread(target=_gfind_loop(target), daemon=True); _mode_thread.start()
+
+        return jsonify(ok=True, target=target)
+
+    except Exception as e:
+
+        log.exception("gfind error")
+
+        return jsonify(ok=False, error=str(e))
+
+
+
 @app.route("/api/status")
 
 def api_status():
@@ -1292,6 +1504,7 @@ def api_agent_voice():
 
 if __name__ == "__main__":
 
+    pin_to_cores(CORES_GENERAL, "flask-main")
     log.info("Sahayak backend starting. Model=%s Camera=%s", CLAUDE_MODEL, PHONE_IP)
 
     app.run(host="0.0.0.0", port=5000, threaded=True)
