@@ -297,7 +297,9 @@
 
       <h2>Make the robot speak (free)</h2>
 
-      <div class="row"><input id="say" type="text" placeholder="Type something to say out loud…"><button class="btn" onclick="doSpeak()">Speak</button></div>
+      <div class="row"><input id="say" type="text" placeholder="Type something to say out loud…"><button class="btn" onclick="doSpeak()">Speak</button>
+
+        <button class="btn ghost" id="phonespk" onclick="togglePhoneSpeak()">🔇 Phone speaker: OFF</button></div>
 
     </div>
 
@@ -396,6 +398,63 @@ async function geminiFindVoice(){if(!confirm("Record and search with Gemini? (us
 
 
 setInterval(updateLiveVis,1500);
+
+
+
+
+// ---- Phone speaker: browser speaks whatever the robot says ----
+
+let phoneSpeakOn = false;
+
+let lastSpeechId = 0;
+
+function togglePhoneSpeak(){
+
+  phoneSpeakOn = !phoneSpeakOn;
+
+  const b = document.getElementById('phonespk');
+
+  if(b){ b.textContent = phoneSpeakOn ? '🔊 Phone speaker: ON' : '🔇 Phone speaker: OFF'; }
+
+  if(phoneSpeakOn && 'speechSynthesis' in window){
+
+    const u = new SpeechSynthesisUtterance('Phone speaker enabled.');
+
+    window.speechSynthesis.speak(u);
+
+  }
+
+}
+
+async function pollSpeech(){
+
+  if(!phoneSpeakOn) return;
+
+  try{
+
+    const r = await fetch('/api/lastspeech'); const d = await r.json();
+
+    if(d.ok && d.id > lastSpeechId){
+
+      lastSpeechId = d.id;
+
+      if(d.text && 'speechSynthesis' in window){
+
+        const u = new SpeechSynthesisUtterance(d.text);
+
+        u.rate = 1.0; u.volume = 1.0;
+
+        window.speechSynthesis.speak(u);
+
+      }
+
+    }
+
+  }catch(e){}
+
+}
+
+setInterval(pollSpeech, 1200);
 
 
 pollStatus();pollSensors();setInterval(pollStatus,3000);setInterval(pollSensors,1500);setInterval(pollMode,2000);

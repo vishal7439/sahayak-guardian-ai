@@ -225,6 +225,14 @@ def do_speak(text):
 
     try:
 
+        _record_speech(text)   # let the phone browser speak it too
+
+    except Exception:
+
+        pass
+
+    try:
+
         import subprocess
 
         piper_dir = str(Path(__file__).with_name("piper"))
@@ -395,6 +403,7 @@ def set_drive(direction, speed=150):
 
 
 def _keepalive_loop():
+    pin_to_cores(CORES_MOTOR, "keepalive/motor")
 
     while True:
 
@@ -914,41 +923,77 @@ def gemma_route(text):
 
 def route_command(text):
 
-    """Keyword-first routing (reliable), Gemma as fallback (flexible)."""
+    """Keyword-first routing (reliable), Gemma as fallback. Tolerates Whisper mishearings."""
 
-    t = text.lower()
+    t = text.lower().strip()
 
-    # 1) clear keyword matches
 
-    if any(w in t for w in ["check the room","check room","scan the room","room check","scan room"]):
+
+    # --- VISION: what do you see / describe ---
+
+    if any(w in t for w in ["what do you see", "what can you see", "what you see",
+
+                            "describe", "look around", "what is there", "what's there"]):
+
+        return "VISION", None
+
+
+
+    # --- ROOM CHECK ---
+
+    if any(w in t for w in ["check the room", "check room", "scan the room",
+
+                            "room check", "scan room", "sweep the room"]):
 
         return "ROOMCHECK", None
+
+
+
+    # --- FOLLOW ---
 
     if any(w in t for w in ["follow"]):
 
         return "FOLLOW", None
 
-    if any(w in t for w in ["guard","watch"]):
+
+
+    # --- GUARD (whisper often hears 'god', 'cod', 'gard') ---
+
+    if any(w in t for w in ["guard", "god the", "god mode", "gaurd", "gard",
+
+                            "watch the room", "watch mode", "keep watch"]):
 
         return "GUARD", None
 
-    if any(w in t for w in ["patrol"]):
+
+
+    # --- PATROL ---
+
+    if any(w in t for w in ["patrol", "patrole", "go around", "walk around", "petrol"]):
 
         return "PATROL", None
 
-    if any(w in t for w in ["stop"]):
+
+
+    # --- STOP ---
+
+    if any(w in t for w in ["stop", "halt", "stand still"]):
 
         return "STOP", None
 
-    if any(w in t for w in ["find","where is","where's","look for"]):
 
-        # extract object for find
+
+    # --- FIND <object> ---
+
+    if any(w in t for w in ["find", "where is", "where's", "look for", "search for"]):
 
         import sys
 
-        if os.path.expanduser("~/sahayak") not in sys.path:
+        p = os.path.expanduser("~/sahayak")
 
-            sys.path.insert(0, os.path.expanduser("~/sahayak"))
+        if p not in sys.path:
+
+            sys.path.insert(0, p)
 
         import voice_command as vc
 
@@ -956,7 +1001,9 @@ def route_command(text):
 
         return "FIND", obj
 
-    # 2) fall back to Gemma for unusual phrasing
+
+
+    # --- fall back to Gemma for unusual phrasing ---
 
     label = gemma_route(text)
 
@@ -965,7 +1012,6 @@ def route_command(text):
         return label, None
 
     return "UNKNOWN", None
-
 
 
 def gemini_find_object(target):
@@ -1057,6 +1103,22 @@ def _gfind_loop(target):
         _active_mode = None
 
     return loop
+
+
+
+# ---------------- Phone speaker support ----------------
+
+_last_speech = {"text": "", "id": 0}
+
+
+
+def _record_speech(text):
+
+    """Remember what the robot just said, so the phone browser can speak it too."""
+
+    _last_speech["text"] = text
+
+    _last_speech["id"] += 1
 
 
 
@@ -1260,6 +1322,42 @@ def api_voice():
 
                 do_speak("I could not tell which object to find.")
 
+        elif action == "VISION":
+
+            try:
+
+                import sys
+
+                VDIR = "/app/pydev_demo/02_detection_sample/03_ultralytics_yolov8"
+
+                if VDIR not in sys.path:
+
+                    sys.path.insert(0, VDIR)
+
+                import sahayak_vision as vision
+
+                dets = vision.detect()
+
+                if dets:
+
+                    from collections import Counter
+
+                    c = Counter(n for n, s in dets if s >= 0.4)
+
+                    parts = [f"{v} {k}" + ("s" if v > 1 else "") for k, v in c.most_common()]
+
+                    do_speak("I can see " + ", ".join(parts) + ".")
+
+                else:
+
+                    do_speak("I do not see anything I recognize.")
+
+            except Exception as e:
+
+                log.error("[voice] vision error: %s", e)
+
+                do_speak("Sorry, I could not look right now.")
+
         elif action == "DESCRIBE":
 
             try:
@@ -1377,6 +1475,16 @@ def api_gfind():
         log.exception("gfind error")
 
         return jsonify(ok=False, error=str(e))
+
+
+
+@app.route("/api/lastspeech")
+
+def api_lastspeech():
+
+    """Browser polls this; if id changed, the phone speaks the text."""
+
+    return jsonify(ok=True, text=_last_speech["text"], id=_last_speech["id"])
 
 
 
