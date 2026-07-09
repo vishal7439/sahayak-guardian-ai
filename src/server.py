@@ -1516,7 +1516,11 @@ def api_vision():
 
         dets = yolo_detections()
 
-        return jsonify(ok=True, answer=("I see: " + ", ".join(dets)) if dets else "Nothing detected yet.")
+        answer = ("I see: " + ", ".join(dets)) if dets else "Nothing detected yet."
+
+        do_speak(answer)          # speak via 3.5mm AND record for phone speaker
+
+        return jsonify(ok=True, answer=answer)
 
     return jsonify(ok=False, error="Scene description runs online — switch to Online mode.")
 
