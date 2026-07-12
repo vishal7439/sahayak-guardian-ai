@@ -55,6 +55,18 @@ You talk to it, and it acts — all core intelligence runs **offline on the RDK 
 
 | 💬 Describe scene | Rich natural-language description | Online (Gemini) |
 
+| 🧭 Explore mode | Rotate, scan, announce objects one-by-one with distance | Offline |
+
+| 📏 Distance fusion | Ultrasonic + YOLO → "person, 0.6 m ahead" | Offline |
+
+| 💬 Conversational chat | Warm companion replies (Gemma 3 1B persona) | Offline |
+
+| 🙌 Hands-free mode | Continuous wake-word listening ("IrisBot") | Offline |
+
+| 🔌 EMI auto-reconnect | Recovers dropped Pico USB without restart | Offline |
+
+| 🔗 ROS 2 nodes | BPU detections published on /sahayak/detections | Offline |
+
 
 
 ## Quick Start
@@ -99,13 +111,68 @@ See `docs/` for full architecture, BOM, roadmap, risks, and benchmarks.
 
 
 
-## Safety
+## Safety & Emergency Stop
 
-The Pico firmware auto-stops motors within 0.6 s if commands stop (dead-man's switch). Home-control demonstrated with low-voltage LEDs only.
+- **Emergency Stop button** on the web remote immediately halts all motion (`POST /api/stop`).
+
+- **Firmware dead-man's switch:** the Pico auto-stops motors within 0.6 s if it
+
+  stops receiving commands (covers crashes, network loss, EMI USB drops).
+
+- **Server-side auto-reconnect:** if motor EMI drops the Pico USB link, the server
+
+  detects the dead handle and re-opens the port — recovering without a restart.
+
+- **Safe shutdown:** leaving any autonomous mode calls `stop_mode()`, which stops
+
+  the motors before exiting. Stopping `sahayak.service` also halts all motion.
+
+- Home-appliance control demonstrated with low-voltage loads only.
 
 
 
 ## License
 
 MIT — see LICENSE.
+
+
+
+
+## Deployment (systemd services)
+
+
+
+For always-on operation, the robot server and the offline Gemma LLM run as
+
+systemd services — auto-start on boot, auto-restart on failure:
+
+
+
+    sudo systemctl enable --now sahayak.service   # Flask robot server (port 5000)
+
+    sudo systemctl enable --now gemma.service     # Gemma 3 1B llama-server (port 8081)
+
+
+
+## ROS 2 detection nodes (ROS 2 Humble)
+
+
+
+Sahayak includes real ROS 2 nodes that publish BPU YOLO detections:
+
+
+
+    source /opt/ros/humble/setup.bash
+
+    python3 ros2/detection_publisher.py    # publishes BPU detections
+
+    python3 ros2/detection_subscriber.py   # subscribes and logs
+
+    ros2 topic echo /sahayak/detections    # verify live
+
+
+
+See `docs/ROS2_HYBRID.md` for the architecture rationale and `ros2/ROS2_EVIDENCE.txt`
+
+for verified live output.
 
