@@ -21,6 +21,14 @@
 
 
 
+## Demo Video
+
+
+
+▶️ **Watch the full demo:** https://youtu.be/oQaQGBd4iME
+
+
+
 ## What it does
 
 
@@ -97,7 +105,7 @@ python3 src/server.py
 
 |---|---|
 
-| Model | YOLOv8x (640×640, NV12) |
+| Model | YOLOv8n (640×640, NV12) |
 
 | Hardware | RDK X5 BPU (10 TOPS) |
 
