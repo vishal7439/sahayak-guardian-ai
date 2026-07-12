@@ -105,11 +105,15 @@ _pico = None
 
 def pico():
 
-    global _pico
+    global _pico, PICO_PORT
 
     if serial is None: return None
 
     if _pico is not None: return _pico
+
+    # re-detect port in case EMI reconnect re-enumerated it (ttyACM0 -> ttyACM1)
+
+    PICO_PORT = _find_pico()
 
     try:
 
@@ -127,13 +131,27 @@ def pico():
 
 def pico_write(line):
 
+    global _pico
+
     p = pico()
 
     if p is None: log.info("[pico-sim] %s", line); return False
 
-    try: p.write((line + "\n").encode()); return True
+    try:
 
-    except Exception as e: log.error("Pico write failed: %s", e); return False
+        p.write((line + "\n").encode()); return True
+
+    except Exception as e:
+
+        log.error("Pico write failed (%s) — dropping handle, will reconnect.", e)
+
+        try: p.close()
+
+        except Exception: pass
+
+        _pico = None   # clear dead handle so next call reconnects
+
+        return False
 
 
 
@@ -308,6 +326,52 @@ def yolo_detections():
 
         return []
 
+
+
+def fused_detections():
+
+    """ADDITIVE: combine YOLO detections with HC-SR04 nearest-distance.
+
+    NOTE: the ultrasonic sensor reports ONE distance (nearest object in its
+
+    forward cone), not a per-object distance. So distance_cm here means
+
+    'nearest obstacle straight ahead', paired with the full YOLO label set.
+
+    Returns: {"objects": [names...], "nearest_cm": float|None, "phrase": str}."""
+
+    names = yolo_detections()            # existing function, untouched
+
+    try:
+
+        sensors = pico_read_sensors()    # existing function, untouched
+
+        nearest = sensors.get("distance_cm")
+
+    except Exception as e:
+
+        log.warning("[fusion] sensor read failed: %s", e); nearest = None
+
+
+
+    if not names:
+
+        phrase = "I don't see anything I recognise right now."
+
+    elif nearest is None:
+
+        phrase = "I can see: " + ", ".join(names) + "."
+
+    else:
+
+        m = nearest / 100.0
+
+        lead = names[0]
+
+        phrase = f"I can see {lead}, and the nearest object is about {m:.1f} meters ahead."
+
+    return {"objects": names, "nearest_cm": nearest, "phrase": phrase}
+
 # ---------------- Claude brain (online, optional) ----------------
 
 _claude_calls = 0
@@ -428,6 +492,8 @@ threading.Thread(target=_keepalive_loop, daemon=True).start()
 _mode_thread = None
 
 _mode_stop = threading.Event()
+_handsfree_stop = threading.Event()
+_handsfree_thread = None
 
 _active_mode = None
 
@@ -743,6 +809,48 @@ GEMINI_MODEL = "gemini-flash-lite-latest"
 
 
 
+def gemini_chat(question):
+
+    """ADDITIVE: text-only conversational Gemini (no camera frame).
+
+    Smarter than offline Gemma chat. Uses same key/model/session cap."""
+
+    global _gemini_calls
+
+    if _gemini_calls >= SESSION_CAP:
+
+        return "I have reached my online question limit for this session."
+
+    from google import genai
+
+    from google.genai import types
+
+    client = genai.Client()   # reads GEMINI_API_KEY from env
+
+    prompt = ("You are Sahayak, a warm and friendly guardian robot who helps at home. "
+
+              "You are having a spoken conversation. Answer helpfully and kindly in 1 to 3 "
+
+              "short sentences that are easy to say out loud. No lists, no emojis. "
+
+              "User says: " + question)
+
+    resp = client.models.generate_content(model=GEMINI_MODEL,
+
+                                           contents=[types.Part.from_text(text=prompt)])
+
+    _gemini_calls += 1
+
+    try:
+
+        return resp.text.strip()
+
+    except Exception:
+
+        return "Sorry, I could not think of a reply just now."
+
+
+
 def gemini_describe(question):
 
     """Send camera frame + question to Gemini Flash-Lite. Returns spoken answer."""
@@ -865,6 +973,115 @@ def check_room_scan():
 
 
 
+def explore_scan():
+
+    """EXPLORE MODE (additive): rotate a full turn, collect objects + nearest
+
+    distance at the step each was first seen, then announce ONE BY ONE with
+
+    pauses. Reuses check-room rotation style + Day-2 distance fusion. Offline."""
+
+    import sys
+
+    VDIR = "/app/pydev_demo/02_detection_sample/03_ultralytics_yolov8"
+
+    if VDIR not in sys.path:
+
+        sys.path.insert(0, VDIR)
+
+    import sahayak_vision as vision
+
+    log.info("[explore] starting exploration sweep")
+
+    do_speak("Exploring the room. Let me look around.")
+
+    STEPS = 10
+
+    first_seen = {}   # object name -> distance_cm when first spotted (or None)
+
+    for step in range(STEPS):
+
+        if _mode_stop.is_set():
+
+            break
+
+        try:
+
+            dets = vision.detect()
+
+            names = [name for name, score in dets if score >= 0.4]
+
+            dist = None
+
+            try:
+
+                dist = pico_read_sensors().get("distance_cm")
+
+            except Exception:
+
+                pass
+
+            for n in names:
+
+                if n not in first_seen:
+
+                    first_seen[n] = dist
+
+            log.info("[explore] step %d saw: %s (dist=%s)", step, names, dist)
+
+        except Exception as e:
+
+            log.error("[explore] %s", e)
+
+        do_drive("RIGHT", 150); _mode_stop.wait(0.4); do_drive("STOP"); _mode_stop.wait(0.8)
+
+    do_drive("STOP")
+
+
+
+    if _mode_stop.is_set():
+
+        do_speak("Exploration stopped."); return
+
+    if not first_seen:
+
+        do_speak("I explored the room but did not find anything I recognize."); return
+
+
+
+    do_speak("Here is what I found.")
+
+    _mode_stop.wait(0.8)
+
+    # announce ONE BY ONE with pauses
+
+    for name, dist in first_seen.items():
+
+        if _mode_stop.is_set():
+
+            break
+
+        if dist is not None:
+
+            m = dist / 100.0
+
+            do_speak(f"I see a {name}, about {m:.1f} meters away.")
+
+        else:
+
+            do_speak(f"I see a {name}.")
+
+        _mode_stop.wait(1.5)   # pause between each announcement
+
+    do_speak("That is everything I found.")
+
+    log.info("[explore] done: %s", dict(first_seen))
+
+# register Explore mode now that explore_scan is defined
+_MODE_LOOPS["explore"] = explore_scan
+
+
+
 def _roomcheck_loop():
 
     def loop():
@@ -893,7 +1110,11 @@ def gemma_route(text):
 
         prompt = ("You are a robot command classifier. Map the user request to EXACTLY ONE label "
 
-                  "from this list: FIND, FOLLOW, GUARD, PATROL, ROOMCHECK, DESCRIBE, SPEAK, STOP. "
+                  "from this list: FIND, FOLLOW, GUARD, PATROL, ROOMCHECK, DESCRIBE, STOP, CHAT. "
+
+                  "Use CHAT if the user is just talking, asking a question, or making conversation "
+
+                  "rather than giving a movement or vision command. "
 
                   "Reply with only the label.\nUser: " + text + "\nLabel:")
 
@@ -903,11 +1124,15 @@ def gemma_route(text):
 
                               headers={"Content-Type": "application/json"})
 
-        with _urlreq.urlopen(req, timeout=8) as r:
+        with _urlreq.urlopen(req, timeout=20) as r:
 
             out = json.loads(r.read())["content"].strip().upper()
 
-        for label in ["ROOMCHECK","FIND","FOLLOW","GUARD","PATROL","DESCRIBE","SPEAK","STOP"]:
+        if "CHAT" in out:
+
+            return None   # not a command -> triggers conversational fallback
+
+        for label in ["ROOMCHECK","FIND","FOLLOW","GUARD","PATROL","DESCRIBE","STOP"]:
 
             if label in out:
 
@@ -918,6 +1143,54 @@ def gemma_route(text):
         log.warning("gemma_route failed: %s", e)
 
     return None
+
+
+
+GEMMA_PERSONA = (
+
+    "You are Sahayak, a warm and friendly little guardian robot who helps at home. "
+
+    "You speak naturally and kindly, like a caring companion. "
+
+    "Keep replies short: one or two sentences, easy to say out loud. "
+
+    "Never use lists, emojis, or technical jargon. Just talk simply and warmly."
+
+)
+
+
+
+def gemma_chat(text):
+
+    """ADDITIVE: warm conversational reply from local Gemma (offline, no tokens).
+
+    Separate from gemma_route() which stays a strict command classifier.
+
+    Returns a friendly sentence string, or None on failure."""
+
+    try:
+
+        prompt = (GEMMA_PERSONA + "\n\nPerson: " + text + "\nSahayak:")
+
+        data = json.dumps({"prompt": prompt, "n_predict": 60,
+
+                           "temperature": 0.7, "stop": ["\nPerson:", "Person:"]}).encode()
+
+        req = _urlreq.Request("http://127.0.0.1:8081/completion", data=data,
+
+                              headers={"Content-Type": "application/json"})
+
+        with _urlreq.urlopen(req, timeout=20) as r:
+
+            out = json.loads(r.read())["content"].strip()
+
+        return out if out else None
+
+    except Exception as e:
+
+        log.warning("gemma_chat failed: %s", e)
+
+        return None
 
 
 
@@ -969,6 +1242,9 @@ def route_command(text):
 
     # --- PATROL ---
 
+    # --- EXPLORE ---
+    if any(w in t for w in ["explore", "exploration", "look around and tell", "scan and tell"]):
+        return "EXPLORE", None
     if any(w in t for w in ["patrol", "patrole", "go around", "walk around", "petrol"]):
 
         return "PATROL", None
@@ -1003,15 +1279,15 @@ def route_command(text):
 
 
 
-    # --- fall back to Gemma for unusual phrasing ---
+    # No Gemma classifier here: keyword matches above catch all commands.
 
-    label = gemma_route(text)
+    # SPEED: keywords catch all commands above; skip the slow classifier.
 
-    if label:
+    # Unmatched input is conversation -> chat directly (saves ~11s).
 
-        return label, None
 
-    return "UNKNOWN", None
+
+    return "CHAT", text
 
 
 def gemini_find_object(target):
@@ -1168,6 +1444,32 @@ def api_sensors():
 
 
 
+@app.route("/api/scan")
+
+def api_scan():
+
+    """ADDITIVE: fused YOLO + ultrasonic. Returns objects, nearest_cm, phrase.
+
+    Pass ?speak=1 to also speak the phrase via the existing speak path."""
+
+    try:
+
+        r = fused_detections()
+
+        if request.args.get("speak") == "1":
+
+            try: do_speak(r["phrase"])
+
+            except Exception as e: log.warning("[scan] speak failed: %s", e)
+
+        return jsonify(ok=True, **r)
+
+    except Exception as e:
+
+        return jsonify(ok=False, objects=[], nearest_cm=None, phrase="", error=str(e))
+
+
+
 @app.route("/api/find", methods=["POST"])
 
 def api_find():
@@ -1246,8 +1548,223 @@ def api_roomcheck():
 
 
 
-@app.route("/api/voice", methods=["POST"])
 
+
+def _handsfree_loop():
+
+    """HANDS-FREE (additive): greet once, then continuously listen. Only act when
+
+    the wake word 'irisbot' is heard. Reuses route_command + dispatch_action.
+
+    Loops until _handsfree_stop is set (panel Stop button). Offline."""
+
+    WAKE = ["irisbot", "iris bot", "iris board", "eris bot", "iris pot", "iris what",
+
+            "iris bought", "irisbot", "hey iris", "iris", "irispot", "iris but"]
+
+    import sys
+
+    p = os.path.expanduser("~/sahayak")
+
+    if p not in sys.path: sys.path.insert(0, p)
+
+    import voice_command as vc
+
+    do_speak("Hey Vishal, how can I help you today? Say iris bot before your command.")
+
+    log.info("[handsfree] started")
+
+    while not _handsfree_stop.is_set():
+
+        try:
+
+            vc.record(5)
+
+            if _handsfree_stop.is_set():
+
+                break
+
+            text = (vc.transcribe() or "").strip()
+
+            if not text or text == "[BLANK_AUDIO]":
+
+                continue
+
+            low = text.lower()
+
+            hit = next((w for w in WAKE if w in low), None)
+
+            log.info("[handsfree] heard: %r (wake=%s)", text, bool(hit))
+
+            if not hit:
+
+                continue   # no wake word -> stay quiet, keep listening
+
+            # strip the wake word, keep the command/question after it
+
+            idx = low.find(hit) + len(hit)
+
+            cmd = text[idx:].lstrip(" ,.-").strip()
+
+            if not cmd:
+
+                do_speak("Yes Vishal, I am listening.")
+
+                continue
+
+            action, arg = route_command(cmd)
+
+            log.info("[handsfree] routed %r -> %s", cmd, action)
+
+            dispatch_action(action, arg, cmd)
+
+        except Exception as e:
+
+            log.error("[handsfree] loop error: %s", e)
+
+            _handsfree_stop.wait(1.0)
+
+    do_speak("Hands free mode off.")
+
+    log.info("[handsfree] stopped")
+
+
+
+def dispatch_action(action, arg, text=""):
+    """Shared action dispatch: used by both api_voice and hands-free loop."""
+    global _mode_thread, _active_mode
+    if action == "ROOMCHECK":
+
+        stop_mode(); _mode_stop.clear(); _active_mode = "roomcheck"
+
+        _mode_thread = threading.Thread(target=_roomcheck_loop(), daemon=True); _mode_thread.start()
+
+        do_speak("Checking the room now.")
+
+    elif action == "FOLLOW":
+
+        start_mode("follow"); do_speak("Following you now.")
+
+    elif action == "GUARD":
+
+        start_mode("guard"); do_speak("Guard mode on.")
+
+    elif action == "PATROL":
+
+        start_mode("patrol"); do_speak("Patrolling now.")
+    elif action == "EXPLORE":
+        start_mode("explore"); do_speak("Starting to explore.")
+
+    elif action == "STOP":
+
+        stop_mode(); do_speak("Stopped.")
+
+    elif action == "FIND":
+
+        if arg:
+
+            stop_mode(); _mode_stop.clear(); _active_mode = "find:" + arg
+
+            _mode_thread = threading.Thread(target=_find_loop_target(arg), daemon=True); _mode_thread.start()
+
+        else:
+
+            do_speak("I could not tell which object to find.")
+
+    elif action == "VISION":
+
+        try:
+
+            import sys
+
+            VDIR = "/app/pydev_demo/02_detection_sample/03_ultralytics_yolov8"
+
+            if VDIR not in sys.path:
+
+                sys.path.insert(0, VDIR)
+
+            import sahayak_vision as vision
+
+            dets = vision.detect()
+
+            if dets:
+
+                from collections import Counter
+
+                c = Counter(n for n, s in dets if s >= 0.4)
+
+                parts = [f"{v} {k}" + ("s" if v > 1 else "") for k, v in c.most_common()]
+
+                do_speak("I can see " + ", ".join(parts) + ".")
+
+            else:
+
+                do_speak("I do not see anything I recognize.")
+
+        except Exception as e:
+
+            log.error("[voice] vision error: %s", e)
+
+            do_speak("Sorry, I could not look right now.")
+
+    elif action == "DESCRIBE":
+
+        try:
+
+            ans = gemini_describe("Describe what you see briefly.")
+
+            do_speak(ans)
+
+        except Exception:
+
+            do_speak("Scene description needs online mode.")
+
+    elif action == "SPEAK":
+
+        do_speak("Hello, I am Sahayak. How can I help?")
+
+    elif action == "CHAT":
+        reply = gemma_chat(arg) or "Sorry, I did not quite catch that."
+        do_speak(reply)
+    else:
+
+        do_speak("Sorry, I did not understand that command.")
+
+@app.route("/api/handsfree/start", methods=["POST"])
+
+def api_handsfree_start():
+
+    """Start hands-free continuous listening loop (offline)."""
+
+    global _handsfree_thread
+
+    if _handsfree_thread and _handsfree_thread.is_alive():
+
+        return jsonify(ok=True, running=True, note="already running")
+
+    _handsfree_stop.clear()
+
+    _handsfree_thread = threading.Thread(target=_handsfree_loop, daemon=True)
+
+    _handsfree_thread.start()
+
+    return jsonify(ok=True, running=True)
+
+
+
+@app.route("/api/handsfree/stop", methods=["POST"])
+
+def api_handsfree_stop():
+
+    """Stop the hands-free loop."""
+
+    _handsfree_stop.set()
+
+    return jsonify(ok=True, running=False)
+
+
+
+@app.route("/api/voice", methods=["POST"])
 def api_voice():
 
     """Universal voice command: record -> transcribe -> route -> execute -> confirm."""
@@ -1286,97 +1803,7 @@ def api_voice():
 
         # execute the matched action
 
-        if action == "ROOMCHECK":
-
-            stop_mode(); _mode_stop.clear(); _active_mode = "roomcheck"
-
-            _mode_thread = threading.Thread(target=_roomcheck_loop(), daemon=True); _mode_thread.start()
-
-            do_speak("Checking the room now.")
-
-        elif action == "FOLLOW":
-
-            start_mode("follow"); do_speak("Following you now.")
-
-        elif action == "GUARD":
-
-            start_mode("guard"); do_speak("Guard mode on.")
-
-        elif action == "PATROL":
-
-            start_mode("patrol"); do_speak("Patrolling now.")
-
-        elif action == "STOP":
-
-            stop_mode(); do_speak("Stopped.")
-
-        elif action == "FIND":
-
-            if arg:
-
-                stop_mode(); _mode_stop.clear(); _active_mode = "find:" + arg
-
-                _mode_thread = threading.Thread(target=_find_loop_target(arg), daemon=True); _mode_thread.start()
-
-            else:
-
-                do_speak("I could not tell which object to find.")
-
-        elif action == "VISION":
-
-            try:
-
-                import sys
-
-                VDIR = "/app/pydev_demo/02_detection_sample/03_ultralytics_yolov8"
-
-                if VDIR not in sys.path:
-
-                    sys.path.insert(0, VDIR)
-
-                import sahayak_vision as vision
-
-                dets = vision.detect()
-
-                if dets:
-
-                    from collections import Counter
-
-                    c = Counter(n for n, s in dets if s >= 0.4)
-
-                    parts = [f"{v} {k}" + ("s" if v > 1 else "") for k, v in c.most_common()]
-
-                    do_speak("I can see " + ", ".join(parts) + ".")
-
-                else:
-
-                    do_speak("I do not see anything I recognize.")
-
-            except Exception as e:
-
-                log.error("[voice] vision error: %s", e)
-
-                do_speak("Sorry, I could not look right now.")
-
-        elif action == "DESCRIBE":
-
-            try:
-
-                ans = gemini_describe("Describe what you see briefly.")
-
-                do_speak(ans)
-
-            except Exception:
-
-                do_speak("Scene description needs online mode.")
-
-        elif action == "SPEAK":
-
-            do_speak("Hello, I am Sahayak. How can I help?")
-
-        else:
-
-            do_speak("Sorry, I did not understand that command.")
+        dispatch_action(action, arg, text)
 
 
 
@@ -1609,6 +2036,82 @@ def api_agent_voice():
     except Exception as e:
 
         log.exception("gemini voice error")
+
+        return jsonify(ok=False, error=str(e))
+
+
+
+@app.route("/api/hey_sahayak", methods=["POST"])
+
+def api_hey_sahayak():
+
+    """WAKE-WORD gate: record + transcribe locally (free). Only call Gemini if
+
+    'hey sahayak' is heard. No wake word -> zero Gemini calls."""
+
+    WAKE = ["hey robot", "hi robot", "ok robot", "okay robot", "a robot",
+
+            "hey robert", "hey robo", "hey robbot", "hey robat", "he robot",
+
+            "hey sahayak", "sahayak", "hey saha"]
+
+    try:
+
+        import sys
+
+        p = os.path.expanduser("~/sahayak")
+
+        if p not in sys.path: sys.path.insert(0, p)
+
+        import voice_command as vc
+
+        vc.record(5)
+
+        text = (vc.transcribe() or "").strip()
+
+        if not text:
+
+            return jsonify(ok=False, error="did not catch anything")
+
+        low = text.lower()
+
+        hit = next((w for w in WAKE if w in low), None)
+
+        if not hit:
+
+            # NO wake word -> do NOT call Gemini (saves the call)
+
+            do_speak("Please say, hey Sahayak, before your question.")
+
+            return jsonify(ok=True, heard=text, woke=False,
+
+                           answer="(no wake word - Gemini not called)", calls=_gemini_calls)
+
+        # strip the wake phrase, keep the actual question
+
+        idx = low.find(hit) + len(hit)
+
+        question = text[idx:].lstrip(" ,.-").strip()
+
+        if not question:
+
+            do_speak("Yes? I am listening. Please ask again with hey Sahayak.")
+
+            return jsonify(ok=True, heard=text, woke=True,
+
+                           answer="(woke but no question)", calls=_gemini_calls)
+
+        answer = gemini_chat(question)   # ONE Gemini call
+
+        do_speak(answer)
+
+        return jsonify(ok=True, heard=text, woke=True, question=question,
+
+                       answer=answer, calls=_gemini_calls)
+
+    except Exception as e:
+
+        log.exception("hey_sahayak error")
 
         return jsonify(ok=False, error=str(e))
 

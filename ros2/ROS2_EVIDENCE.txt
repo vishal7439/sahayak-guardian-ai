@@ -1,0 +1,17 @@
+=== ROS 2 TOPIC LIST ===
+/parameter_events
+/rosout
+/sahayak/detections
+=== TOPIC INFO ===
+Type: std_msgs/msg/String
+Publisher count: 1
+Subscription count: 1
+=== SAMPLE MESSAGE ===
+
+=== SAMPLE MESSAGE (retry) ===
+data: '{"stamp": 1783856640.4856505, "objects": [{"name": "person", "score": 0.91}]}'
+---
+data: '{"stamp": 1783856641.560379, "objects": [{"name": "person", "score": 0.9}]}'
+---
+data: '{"stamp": 1783856642.421428, "objects": [{"name": "person", "score": 0.91}]}'
+---

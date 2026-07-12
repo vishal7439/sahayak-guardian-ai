@@ -231,6 +231,7 @@
       <div class="mode-row" style="margin-bottom:12px;">
 
         <button class="btn" style="font-size:16px;padding:14px;width:100%;background:var(--accent-dim);border:2px solid var(--accent);" onclick="voiceCommand()">🎙️ VOICE COMMAND — say anything</button>
+        <button class="btn" id="hfBtn" style="font-size:16px;padding:14px;width:100%;background:var(--panel-2);border:2px solid var(--accent);" onclick="toggleHandsfree()">🙌 Hands-Free Mode (IrisBot)</button>
 
       </div>
 
@@ -239,6 +240,8 @@
         <button class="btn" onclick="vision('detect')">👁 What do you see?</button>
 
         <button class="btn ghost" onclick="vision('describe')">📝 Describe scene</button>
+
+        <button class="btn" onclick="scanDescribe()">📏 Scan &amp; Describe (with distance)</button>
 
       </div>
 
@@ -262,6 +265,7 @@
 
         <button class="btn" onclick="voiceFind()">🎤 Find object (speak)</button>
         <button class="btn" onclick="checkRoom()">🔍 Check room</button>
+        <button class="btn" onclick="exploreMode()">🧭 Explore &amp; Announce</button>
 
       </div>
       <div id="console" class="console"><span class="sys">Vision and modes run offline on the BPU — no tokens.</span></div>
@@ -338,6 +342,7 @@ async function pollStatus(){try{const r=await fetch('/api/status');const d=await
 async function doSpeak(){const t=$('say').value.trim();if(!t)return;await post('/api/speak',{text:t});$('say').value='';}
 
 async function vision(k){log('you',k==='describe'?'📝 describe scene':'👁 what do you see?');log('sys','looking…');const d=await post('/api/vision',{mode:k});if(d.ok)log('bot',d.answer);else log('sys',d.error||'vision failed');}
+async function scanDescribe(){log('you','📏 scan & describe');log('sys','scanning with distance…');try{const r=await fetch('/api/scan?speak=1');const d=await r.json();if(d.ok){log('bot',d.phrase);const objs=(d.objects&&d.objects.length)?d.objects.join(', '):'nothing';const dist=(d.nearest_cm==null)?'no reading':d.nearest_cm.toFixed(0)+' cm';log('sys','objects: '+objs+' · nearest: '+dist);}else{log('sys',d.error||'scan failed');}}catch(e){log('sys','scan error: '+e);}}
 
 async function setMode(n){const d=await post('/api/mode/'+n);document.querySelectorAll('.btn.mode').forEach(b=>b.classList.toggle('active',b.dataset.mode===(d.mode||null)));log('sys',d.mode?('mode: '+d.mode):'mode stopped');}
 
@@ -357,6 +362,35 @@ async function voiceFind(){log('you','🎤 listening... say: find my <object>');
 
 async function askAgentVoice(){if(!confirm('Record your question and send to Gemini?'))return;log2('you','🎤 listening... ask your question');const d=await post('/api/agent_voice');if(d.ok){log2('sys','heard: '+(d.heard||''));log2('bot',d.answer);if(d.calls!==undefined)$('tok').textContent=d.calls;}else{log2('sys',d.error||'voice ask failed');}}
 async function checkRoom(){log('you','🔍 check room');log('sys','sweeping the room...');const d=await post('/api/roomcheck');if(d.ok){log('bot','scanning — listen for the report');}else{log('sys',d.error||'roomcheck failed');}}
+async function exploreMode(){log('you','🧭 explore & announce');log('sys','exploring — robot will rotate and announce objects one by one...');const d=await post('/api/mode/explore');if(d.ok){log('bot','exploring now — listen for objects one by one');}else{log('sys',d.error||'explore failed');}}
+let _hfOn=false;
+
+async function toggleHandsfree(){
+
+  const b=document.getElementById('hfBtn');
+
+  if(!_hfOn){
+
+    log('you','hands-free ON');log('sys','listening... say IrisBot then a command');
+
+    const d=await post('/api/handsfree/start');
+
+    if(d.ok){_hfOn=true;b.textContent='Stop Hands-Free';b.style.background='var(--accent)';b.style.color='#fff';}
+
+    else{log('sys','failed to start hands-free');}
+
+  }else{
+
+    const d=await post('/api/handsfree/stop');
+
+    _hfOn=false;b.textContent='Hands-Free Mode (IrisBot)';b.style.background='var(--panel-2)';b.style.color='';
+
+    log('sys','hands-free OFF');
+
+  }
+
+}
+
 async function voiceCommand(){log('you','🎙️ listening... say a command');log('sys','speak now (4s)...');const d=await post('/api/voice');if(d.ok){log('sys','heard: '+d.heard);log('bot','doing: '+d.action+(d.arg?(' '+d.arg):''));}else{log('sys',d.error||'voice failed');}}
 
 
