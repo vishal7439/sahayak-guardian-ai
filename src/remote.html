@@ -266,6 +266,15 @@
         <button class="btn" onclick="voiceFind()">🎤 Find object (speak)</button>
         <button class="btn" onclick="checkRoom()">🔍 Check room</button>
         <button class="btn" onclick="exploreMode()">🧭 Explore &amp; Announce</button>
+        <div style="margin-top:10px;font-size:12px;color:#8FA3C8;font-weight:600;">💡 HOME AUTOMATION (ESP32)</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;">
+        <button class="btn" onclick="homeCtrl(1,'on')">🔴 Red ON</button>
+        <button class="btn ghost" onclick="homeCtrl(1,'off')">Red OFF</button>
+        <button class="btn" onclick="homeCtrl(2,'on')">⚪ White ON</button>
+        </div>
+        <button class="btn ghost" onclick="homeCtrl(2,'off')">White OFF</button>
+        </div>
 
       </div>
       <div id="console" class="console"><span class="sys">Vision and modes run offline on the BPU — no tokens.</span></div>
@@ -363,6 +372,7 @@ async function voiceFind(){log('you','🎤 listening... say: find my <object>');
 async function askAgentVoice(){if(!confirm('Record your question and send to Gemini?'))return;log2('you','🎤 listening... ask your question');const d=await post('/api/agent_voice');if(d.ok){log2('sys','heard: '+(d.heard||''));log2('bot',d.answer);if(d.calls!==undefined)$('tok').textContent=d.calls;}else{log2('sys',d.error||'voice ask failed');}}
 async function checkRoom(){log('you','🔍 check room');log('sys','sweeping the room...');const d=await post('/api/roomcheck');if(d.ok){log('bot','scanning — listen for the report');}else{log('sys',d.error||'roomcheck failed');}}
 async function exploreMode(){log('you','🧭 explore & announce');log('sys','exploring — robot will rotate and announce objects one by one...');const d=await post('/api/mode/explore');if(d.ok){log('bot','exploring now — listen for objects one by one');}else{log('sys',d.error||'explore failed');}}
+async function homeCtrl(relay,state){const names={1:'red bulb',2:'white bulb'};log('you','💡 '+names[relay]+' '+state);const d=await post('/api/home/'+relay+'/'+state);if(d.ok){log('bot',names[relay]+' turned '+state);}else{log('sys','home control failed');}}
 let _hfOn=false;
 
 async function toggleHandsfree(){

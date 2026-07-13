@@ -265,9 +265,17 @@ def do_speak(text):
 
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        subprocess.run(["aplay", "-D", "plughw:0,0", wav],
+        _speaking.set()
 
-                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+
+            subprocess.run(["aplay", "-D", "plughw:0,0", wav],
+
+                           check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        finally:
+
+            _speaking.clear()
 
         log.info("[speak] %s", text)
 
@@ -493,6 +501,7 @@ _mode_thread = None
 
 _mode_stop = threading.Event()
 _handsfree_stop = threading.Event()
+_speaking = threading.Event()
 _handsfree_thread = None
 
 _active_mode = None
@@ -1245,6 +1254,44 @@ def route_command(text):
     # --- EXPLORE ---
     if any(w in t for w in ["explore", "exploration", "look around and tell", "scan and tell"]):
         return "EXPLORE", None
+    # --- STATUS report ---
+
+    if any(w in t for w in ["status", "report", "how are things", "sensor reading", "readings"]):
+
+        return "STATUS", None
+
+
+
+    # --- HOME AUTOMATION (ESP32 relays: red bulb=1, white bulb=2) ---
+
+    if any(w in t for w in ["bulb", "light", "lights", "lamp", "led", "relay", "red bulb", "white bulb"]):
+
+        st = None
+
+        if any(w in t for w in ["off", "shut", "stop", "turn off", "switch off"]): st = "off"
+
+        elif any(w in t for w in ["on", "start", "turn on", "switch on"]): st = "on"
+
+        if st:
+
+            targets = []
+
+            if any(w in t for w in ["red", "first", "one"]): targets.append(1)
+
+            if any(w in t for w in ["white", "cfl", "second", "two"]): targets.append(2)
+
+            if not targets and any(w in t for w in ["all", "both", "everything", "lights", "bulbs"]):
+
+                targets = [1, 2]
+
+            if not targets:
+
+                targets = [1, 2]
+
+            return "HOME", ",".join("%d:%s" % (n, st) for n in targets)
+
+
+
     if any(w in t for w in ["patrol", "patrole", "go around", "walk around", "petrol"]):
 
         return "PATROL", None
@@ -1436,6 +1483,42 @@ def api_stop():
 
 
 
+ESP32_IP = "172.18.100.16"
+
+
+
+def esp_relay(relay, state):
+
+    """ADDITIVE: call the ESP32-S3 home-automation relay.
+
+    relay = 1 (Red Bulb) or 2 (White Bulb); state = on | off | toggle."""
+
+    try:
+
+        import requests
+
+        r = requests.get("http://%s/set?relay=%s&state=%s" % (ESP32_IP, relay, state), timeout=4)
+
+        return r.json()
+
+    except Exception as e:
+
+        log.warning("esp_relay failed: %s", e)
+
+        return None
+
+
+
+@app.route("/api/home/<int:relay>/<state>", methods=["POST", "GET"])
+
+def api_home(relay, state):
+
+    result = esp_relay(relay, state)
+
+    return jsonify(ok=(result is not None), relay=relay, state=state, esp=result)
+
+
+
 @app.route("/api/sensors")
 
 def api_sensors():
@@ -1578,6 +1661,9 @@ def _handsfree_loop():
 
         try:
 
+            # TTS-aware: do not record while the robot is speaking
+            while _speaking.is_set() and not _handsfree_stop.is_set():
+                _handsfree_stop.wait(0.2)
             vc.record(5)
 
             if _handsfree_stop.is_set():
@@ -1616,7 +1702,15 @@ def _handsfree_loop():
 
             log.info("[handsfree] routed %r -> %s", cmd, action)
 
-            dispatch_action(action, arg, cmd)
+            try:
+
+                dispatch_action(action, arg, cmd)
+
+            except Exception as de:
+
+                log.error("[handsfree] dispatch failed: %s", de)
+
+            log.info("[handsfree] ready for next command")
 
         except Exception as e:
 
@@ -1648,6 +1742,68 @@ def dispatch_action(action, arg, text=""):
     elif action == "GUARD":
 
         start_mode("guard"); do_speak("Guard mode on.")
+
+    elif action == "STATUS":
+
+        try:
+
+            sens = pico_read_sensors()
+
+            parts = []
+
+            d = sens.get("distance_cm")
+
+            if d is not None: parts.append("nearest object %.0f centimeters" % d)
+
+            tc = sens.get("temp_c"); hp = sens.get("humidity_pct")
+
+            if tc is not None: parts.append("temperature %.0f degrees" % tc)
+
+            if hp is not None: parts.append("humidity %.0f percent" % hp)
+
+            mode = _active_mode or "idle"
+
+            parts.append("mode " + str(mode))
+
+            do_speak("Status report. " + ", ".join(parts) + ".")
+
+        except Exception as e:
+
+            log.warning("STATUS failed: %s", e)
+
+            do_speak("Sorry, I could not read my sensors.")
+
+    elif action == "HOME":
+
+        names = {1: "red bulb", 2: "white bulb"}
+
+        done = []
+
+        for part in (arg or "").split(","):
+
+            if ":" not in part:
+
+                continue
+
+            n, st = part.split(":", 1)
+
+            try:
+
+                esp_relay(int(n), st)
+
+                done.append("%s %s" % (names.get(int(n), "light"), st))
+
+            except Exception as e:
+
+                log.warning("HOME dispatch failed: %s", e)
+
+        if done:
+
+            do_speak("Okay, " + ", ".join(done) + ".")
+
+        else:
+
+            do_speak("I could not control the lights.")
 
     elif action == "PATROL":
 

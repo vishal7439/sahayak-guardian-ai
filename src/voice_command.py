@@ -5,7 +5,7 @@ import subprocess, os
 
 WHISPER = os.path.expanduser("~/whisper.cpp/build/bin/whisper-cli")
 
-MODEL   = os.path.expanduser("~/whisper.cpp/models/ggml-tiny.en.bin")
+MODEL   = os.path.expanduser("~/whisper.cpp/models/ggml-base.en.bin")
 
 WAV     = "/tmp/voice_cmd.wav"
 
