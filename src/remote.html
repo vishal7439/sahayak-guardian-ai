@@ -289,7 +289,7 @@
 
       <textarea id="cmd" class="cmd-input" placeholder="e.g. look around and greet the person you see"></textarea>
 
-      <div class="mode-row"><button class="btn" onclick="askAgent()">◈ Ask Gemini</button>
+      <div class="mode-row"><button class="btn" onclick="askAgent()">◈ Ask Gemini</button> <button class="btn" onclick="agentAct()">🤖 Do it (agent)</button>
         <button class="btn" onclick="askAgentVoice()">🎤 Ask by voice</button>
             <button class="btn" onclick="geminiFind()">🔎 Find anything</button>
             <button class="btn" onclick="geminiFindVoice()">🎤 Find by voice</button></div>
@@ -362,6 +362,8 @@ let currentMode='offline';
 function switchMode(m){currentMode=m;document.querySelectorAll('.mode-offline').forEach(el=>el.style.display=(m==='offline')?'':'none');document.querySelectorAll('.mode-online').forEach(el=>el.style.display=(m==='online')?'':'none');$('tab-offline').classList.toggle('active',m==='offline');$('tab-online').classList.toggle('active',m==='online');if(m==='online')setMode('stop');}
 
 function log2(w,m){const c=$('console2');const s=document.createElement('div');s.className=w;s.textContent=(w==='you'?'▸ ':w==='bot'?'◈ ':'· ')+m;c.appendChild(s);c.scrollTop=c.scrollHeight;}
+
+async function agentAct(){const t=$('cmd').value.trim();if(!t)return;if(!confirm('Let Gemini decide and act? Uses credit.\n\n"'+t+'"'))return;log2('you','🤖 '+t);$('cmd').value='';log2('sys','Gemini is deciding…');const d=await post('/api/act',{text:t});if(d.ok){log2('bot','decided: '+d.action+(d.arg?(' '+d.arg):'')+' — '+d.say);}else log2('sys',d.error||'agent act failed');}
 
 async function askAgent(){const t=$('cmd').value.trim();if(!t)return;if(!confirm('Ask Gemini and use credit?\n\n"'+t+'"'))return;log2('you',t);$('cmd').value='';log2('sys','Gemini is looking…');const d=await post('/api/agent',{text:t});if(d.ok){log2('bot',d.answer);if(d.claude_calls!==undefined)$('tok').textContent=d.claude_calls;}else log2('sys',d.error||'agent failed');}
 

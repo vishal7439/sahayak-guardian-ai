@@ -75,6 +75,12 @@ You talk to it, and it acts — all core intelligence runs **offline on the RDK 
 
 | 🔗 ROS 2 nodes | BPU detections published on /sahayak/detections | Offline |
 
+| 💡 Home automation | ESP32-S3 relays — "hey robot, turn on red bulb" | Offline |
+
+| 🎤 Phone-mic + VAD listening | Speak anytime — voice-activated capture, no fixed windows | Offline |
+
+| 🤖 Gemini action agent | "it's too dark in here" → Gemini decides → light on | Online |
+
 
 
 ## Quick Start

@@ -1181,7 +1181,7 @@ def gemma_chat(text):
 
         prompt = (GEMMA_PERSONA + "\n\nPerson: " + text + "\nSahayak:")
 
-        data = json.dumps({"prompt": prompt, "n_predict": 60,
+        data = json.dumps({"prompt": prompt, "n_predict": 35,
 
                            "temperature": 0.7, "stop": ["\nPerson:", "Person:"]}).encode()
 
@@ -1509,6 +1509,136 @@ def esp_relay(relay, state):
 
 
 
+AGENT_ACTIONS = """You control a home guardian robot. Reply with ONLY a JSON object, no markdown, no explanation:
+
+{"action": "<ACTION>", "arg": "<ARG or null>", "say": "<short spoken reply, 1-2 sentences>"}
+
+
+
+Available actions:
+
+- GUARD (arg null): start guard mode, alerts when a person is seen
+
+- PATROL (arg null): drive around avoiding obstacles
+
+- FOLLOW (arg null): follow a person
+
+- EXPLORE (arg null): rotate and announce objects seen
+
+- ROOMCHECK (arg null): 360 sweep, report everything seen
+
+- STOPMODE (arg null): stop the current autonomous mode
+
+- VISION (arg null): say what the camera sees right now
+
+- SCAN (arg null): objects plus nearest distance
+
+- STATUS (arg null): sensor status report
+
+- HOME (arg like "1:on" or "2:off" or "1:on,2:on"): relay 1 = red bulb, relay 2 = white bulb
+
+- SPEAK (arg = text to say aloud)
+
+- NONE (arg null): no robot action needed, just conversation - put your answer in say
+
+
+
+Pick the single best action for the user's request. If the request is unsafe, unclear, or unrelated to the robot, use NONE and answer in say."""
+
+
+
+def gemini_agent(user_text):
+
+    """ADDITIVE: Gemini decides a robot action from natural language (online mode).
+
+    Returns (action, arg, say). Falls back to NONE + reply on any problem."""
+
+    global _gemini_calls
+
+    if _gemini_calls >= SESSION_CAP:
+
+        return "NONE", None, "I have reached my online limit for this session."
+
+    try:
+
+        from google import genai
+
+        client = genai.Client()
+
+        prompt = AGENT_ACTIONS + "\n\nUser request: " + user_text
+
+        resp = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
+
+        _gemini_calls += 1
+
+        raw = (resp.text or "").strip()
+
+        raw = raw.replace("```json", "").replace("```", "").strip()
+
+        data = json.loads(raw)
+
+        action = str(data.get("action", "NONE")).upper()
+
+        arg = data.get("arg")
+
+        say = str(data.get("say", "")).strip() or "Okay."
+
+        ALLOWED = {"GUARD","PATROL","FOLLOW","EXPLORE","ROOMCHECK","STOPMODE",
+
+                   "VISION","SCAN","STATUS","HOME","SPEAK","NONE"}
+
+        if action not in ALLOWED:
+
+            return "NONE", None, say
+
+        return action, arg, say
+
+    except Exception as e:
+
+        log.warning("gemini_agent failed: %s", e)
+
+        return "NONE", None, "Sorry, I could not reach my online brain."
+
+
+
+@app.route("/api/act", methods=["POST"])
+
+def api_act():
+
+    """Gemini agent: natural language -> robot action (online mode)."""
+
+    text = (request.get_json(silent=True) or {}).get("text", "").strip()
+
+    if not text:
+
+        return jsonify(ok=False, error="no text")
+
+    action, arg, say = gemini_agent(text)
+
+    log.info("[agent] %r -> %s (arg=%r)", text, action, arg)
+
+    if say:
+
+        do_speak(say)
+
+    if action not in ("NONE", "SPEAK"):
+
+        try:
+
+            dispatch_action(action, arg, text)
+
+        except Exception as e:
+
+            log.error("[agent] dispatch failed: %s", e)
+
+    elif action == "SPEAK" and arg:
+
+        do_speak(str(arg))
+
+    return jsonify(ok=True, action=action, arg=arg, say=say)
+
+
+
 @app.route("/api/home/<int:relay>/<state>", methods=["POST", "GET"])
 
 def api_home(relay, state):
@@ -1664,7 +1794,11 @@ def _handsfree_loop():
             # TTS-aware: do not record while the robot is speaking
             while _speaking.is_set() and not _handsfree_stop.is_set():
                 _handsfree_stop.wait(0.2)
-            vc.record(5)
+            _got = vc.record_vad(max_wait=15) if hasattr(vc, "record_vad") else (vc.record(4) or True)
+
+            if not _got:
+
+                continue
 
             if _handsfree_stop.is_set():
 
