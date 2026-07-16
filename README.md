@@ -83,9 +83,17 @@ You talk to it, and it acts — all core intelligence runs **offline on the RDK 
 
 
 
-## Quick Start
+## Quick Start — Full Setup
 
 
+
+**Platform:** D-Robotics RDK X5 (4 GB), stock RDK Ubuntu 22.04 image (includes the BPU
+
+runtime and Python samples under `/app/pydev_demo`). User in examples: `sunrise`.
+
+
+
+### 1. Clone + Python dependencies
 
 ```bash
 
@@ -93,13 +101,116 @@ git clone https://github.com/vishal7439/sahayak-guardian-ai.git
 
 cd sahayak-guardian-ai
 
-pip3 install flask google-genai requests pyserial
+sudo apt update && sudo apt install -y ffmpeg
 
-python3 src/server.py
+pip3 install flask requests pyserial google-genai
+
+```
+
+
+
+### 2. BPU vision model (YOLOv8x)
+
+The model file `yolov8x_detect_bayese_640x640_nv12.bin` is the D-Robotics
+
+BPU-quantized YOLOv8x build. It ships **pre-installed** with the RDK X5 image at:
+`src/sahayak_vision.py` loads it from that directory. If your image lacks the
+
+samples, download the model from the D-Robotics RDK Model Zoo
+
+(https://github.com/D-Robotics/rdk_model_zoo) and place the `.bin` in that path.
+
+
+
+### 3. Offline voice stack
+
+```bash
+
+# Whisper (speech-to-text)
+
+git clone https://github.com/ggml-org/whisper.cpp ~/whisper.cpp
+
+cd ~/whisper.cpp && cmake -B build && cmake --build build -j4
+
+bash ./models/download-ggml-model.sh base.en
+
+
+
+# Piper (text-to-speech, aarch64 binary + voice)
+
+# unpack piper_linux_aarch64.tar.gz into ./piper next to server.py and add
+
+# the en_US-lessac-medium.onnx voice to the same folder
+
+
+
+# Gemma 3 1B (offline chat, via llama.cpp)
+
+git clone https://github.com/ggml-org/llama.cpp ~/llama.cpp
+
+cd ~/llama.cpp && cmake -B build && cmake --build build -j4 --target llama-server
+
+# download gemma-3-1b-it-Q4_K_M.gguf (Hugging Face) into ~/llama.cpp/
+
+```
+
+
+
+### 4. Pico 2W firmware (motor safety)
+
+Flash MicroPython (v1.2x) on the Pico 2W, then install the firmware:
+
+```bash
+
+pip3 install mpremote
+
+mpremote connect /dev/ttyACM0 cp firmware/pico_main.py :main.py
+
+```
+
+`firmware/pico_main.py` implements the CMD serial protocol and the safety
+
+watchdog (`CMD_TIMEOUT_MS = 600` — motors auto-stop 0.6 s after commands stop).
+
+
+
+### 5. Configure your devices
+
+Edit the constants near the top of `src/server.py` for your network:
+
+- `PHONE_IP` — the phone running the IP Webcam app (camera + microphone;
+
+  enable Audio mode in the app settings)
+
+- `ESP32_IP` — the ESP32-S3 home-automation board
+
+- `PHONE_MIC` in `src/voice_command.py` — same phone IP (audio stream)
+
+
+
+### 6. Run it
+
+```bash
+
+python3 src/server.py            # manual run
 
 # open http://<RDK-X5-IP>:5000
 
 ```
+
+For always-on deployment install the systemd units:
+
+```bash
+
+sudo cp deploy/sahayak.service deploy/gemma.service /etc/systemd/system/
+
+sudo systemctl daemon-reload
+
+sudo systemctl enable --now gemma.service sahayak.service
+
+```
+
+Optional online mode (Gemini): see `deploy/gemini.conf.example`.
 
 
 
@@ -111,7 +222,7 @@ python3 src/server.py
 
 |---|---|
 
-| Model | YOLOv8n (640×640, NV12) |
+| Model | YOLOv8x (640×640, NV12) |
 
 | Hardware | RDK X5 BPU (10 TOPS) |
 

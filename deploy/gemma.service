@@ -1,0 +1,29 @@
+
+[Unit]
+
+Description=Gemma llama-server (offline brain for Sahayak)
+
+After=network.target
+
+
+
+[Service]
+
+Type=simple
+
+User=sunrise
+
+WorkingDirectory=/home/sunrise/llama.cpp
+
+ExecStart=/usr/bin/taskset -c 0-4 /home/sunrise/llama.cpp/build/bin/llama-server -m /home/sunrise/llama.cpp/gemma-3-1b-it-Q4_K_M.gguf --host 127.0.0.1 --port 8081 -c 2048 -t 5 --no-warmup
+
+Restart=on-failure
+
+RestartSec=5
+
+
+
+[Install]
+
+WantedBy=multi-user.target
+

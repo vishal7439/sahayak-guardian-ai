@@ -31,7 +31,7 @@ An offline-first, voice-controlled autonomous guardian robot on the RDK X5 that 
 
 **User:** Home occupants and elderly people; primary interaction is voice, with a web remote as backup. No technical skill needed.
 
-**Core AI capabilities:** YOLOv8n perception on the BPU, Whisper offline speech-to-text, a keyword + Gemma 3 1B command router, Piper offline TTS, and a Pico 2W motor/sensor bridge with a firmware safety watchdog.
+**Core AI capabilities:** YOLOv8x perception on the BPU, Whisper offline speech-to-text, a keyword + Gemma 3 1B command router, Piper offline TTS, and a Pico 2W motor/sensor bridge with a firmware safety watchdog.
 
 **Innovation:** A complete perception→action loop on a 4 GB board. Hybrid brain (offline reflexes + optional Gemini reasoning), a firmware dead-man's-switch plus server-side auto-reconnect against real EMI-induced USB disconnects, ultrasonic+vision distance fusion, and a hands-free wake-word mode.
 
@@ -75,7 +75,7 @@ An offline-first, voice-controlled autonomous guardian robot on the RDK X5 that 
 
 |---|---|
 
-| Model | YOLOv8n (640×640, NV12) on RDK X5 BPU |
+| Model | YOLOv8x (640×640, NV12) on RDK X5 BPU |
 
 | Avg latency | 174 ms |
 

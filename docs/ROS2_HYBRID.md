@@ -17,7 +17,7 @@ communication on the RDK X5's BPU perception path:
 
 
 
-- **`sahayak_detection_publisher`** — runs BPU-accelerated YOLOv8n inference and
+- **`sahayak_detection_publisher`** — runs BPU-accelerated YOLOv8x inference and
 
   publishes detections (object name + confidence) on the `/sahayak/detections`
 

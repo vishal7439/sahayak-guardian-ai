@@ -1,0 +1,36 @@
+[Unit]
+
+Description=Sahayak Robot Server
+
+After=network-online.target
+
+Wants=network-online.target
+
+
+
+[Service]
+
+Type=simple
+
+User=sunrise
+
+WorkingDirectory=/home/sunrise/sahayak
+
+ExecStart=/usr/bin/python3 /home/sunrise/sahayak/server.py
+
+Restart=on-failure
+
+RestartSec=5
+
+# Give the network/hotspot a moment to come up before starting
+
+ExecStartPre=/bin/sleep 15
+
+# Online mode (optional): uncomment and add your key later
+
+
+
+
+[Install]
+
+WantedBy=multi-user.target
