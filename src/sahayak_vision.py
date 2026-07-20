@@ -8,6 +8,16 @@ sys.path.append(os.path.abspath(os.path.join(_HERE, "../..")))
 
 import utils.common_utils as common
 
+# D-Robotics sample modules + BPU model ship with the RDK image here:
+
+_PYDEV = "/app/pydev_demo/02_detection_sample/03_ultralytics_yolov8"
+
+import sys
+
+if _PYDEV not in sys.path:
+
+    sys.path.insert(0, _PYDEV)
+
 from ultralytics_yolov8 import YoloV8
 
 
@@ -19,6 +29,10 @@ CAMERA_URL = "http://192.0.0.4:8090/shot.jpg"
 class _Opt:
 
     model_path  = os.path.join(_HERE, "yolov8x_detect_bayese_640x640_nv12.bin")
+
+    if not os.path.exists(model_path):
+
+        model_path = os.path.join(_PYDEV, "yolov8x_detect_bayese_640x640_nv12.bin")
 
     score_thres = 0.35
 

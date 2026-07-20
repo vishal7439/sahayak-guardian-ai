@@ -9,14 +9,16 @@ Wants=network-online.target
 
 
 [Service]
+# Adjust paths above/below to wherever you cloned the repository
+Environment=PYTHONPATH=/app/pydev_demo/02_detection_sample/03_ultralytics_yolov8
 
 Type=simple
 
 User=sunrise
 
-WorkingDirectory=/home/sunrise/sahayak
+WorkingDirectory=/home/sunrise/sahayak-guardian-ai
 
-ExecStart=/usr/bin/python3 /home/sunrise/sahayak/server.py
+ExecStart=/usr/bin/python3 /home/sunrise/sahayak-guardian-ai/src/server.py
 
 Restart=on-failure
 

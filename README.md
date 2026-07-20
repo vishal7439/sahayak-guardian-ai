@@ -114,7 +114,27 @@ pip3 install flask requests pyserial google-genai
 The model file `yolov8x_detect_bayese_640x640_nv12.bin` is the D-Robotics
 
 BPU-quantized YOLOv8x build. It ships **pre-installed** with the RDK X5 image at:
-`src/sahayak_vision.py` loads it from that directory. If your image lacks the
+`src/sahayak_vision.py` automatically adds that directory to `sys.path` and
+
+loads the model from it. If your samples live elsewhere, either symlink the
+
+model next to the code or export `PYTHONPATH`:
+
+```bash
+
+# Option A — symlink the model into the repo
+
+ln -s /app/pydev_demo/02_detection_sample/03_ultralytics_yolov8/yolov8x_detect_bayese_640x640_nv12.bin src/
+
+
+
+# Option B — point Python at the D-Robotics sample modules
+
+export PYTHONPATH=/app/pydev_demo/02_detection_sample/03_ultralytics_yolov8:$PYTHONPATH
+
+```
+
+(The provided `deploy/sahayak.service` already sets this `PYTHONPATH` for systemd runs.) If your image lacks the
 
 samples, download the model from the D-Robotics RDK Model Zoo
 
